@@ -341,25 +341,54 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       ? ctx.root.config.prefix
       : [ctx.root.config.prefix].filter(Boolean)
     ctx.middleware(async (session, next) => {
-      let content = session.stripped.content.trim()
-      if (!content) return next()
+      const elements = session.elements
+      if (!elements || elements.length === 0) return next()
+
+      let startIndex = 0
+      if (elements[0].type === 'quote') startIndex = 1
+
+      const firstTextEl = elements[startIndex]
+      if (firstTextEl?.type !== 'text') return next()
+
+      let textContent = firstTextEl.attrs.content.trim()
+      if (!textContent) return next()
+
       if (config.triggerMode === 'prefix') {
-        const prefix = prefixes.find((p) => content.startsWith(p))
+        const prefix = prefixes.find((p) => textContent.startsWith(p))
         if (!prefix) return next()
-        content = content.slice(prefix.length).trim()
+        textContent = textContent.slice(prefix.length).trim()
       }
-      const [word, ...args] = content.split(/\s+/)
+
+      const parts = textContent.split(/\s+/)
+      const word = parts[0]
+      if (!word) return next()
 
       const item = await provider.getInfo(word, session)
-      if (item) return session.execute(`memes.make ${content}`)
-
       const shortcut = provider.findShortcut(word, session)
-      if (shortcut) {
-        const shortcutArgsString = shortcut.shortcutArgs.join(' ')
-        const userArgsString = args.join(' ')
-        return session.execute(`memes.make ${shortcut.meme.key} ${shortcutArgsString} ${userArgsString}`)
+      if (!item && !shortcut) return next()
+
+      const inputElements: h[] = []
+
+      if (session.quote?.content) {
+        inputElements.push(...h.parse(session.quote.content))
       }
-      return next()
+
+      const remainingText = textContent.slice(word.length).trim()
+      if (remainingText) inputElements.push(h.text(remainingText))
+      inputElements.push(...elements.slice(startIndex + 1))
+
+      const targetKey = shortcut ? shortcut.meme.key : item.key
+      let finalInput = inputElements
+
+      if (shortcut) {
+        const shortcutArgs = h.parse(shortcut.shortcutArgs.join(' '))
+        finalInput = [...shortcutArgs, ...inputElements]
+      }
+
+      return session.execute({
+        name: 'memes.make',
+        args: [targetKey, finalInput]
+      })
     }, true)
   }
 }
