@@ -337,31 +337,32 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
 
   if (config.triggerMode !== 'disable') {
-    const prefixes = [].concat(ctx.root.config.prefix).filter(Boolean)
+    const prefixes: any[] = ([]).concat(ctx.root.config.prefix).filter(Boolean)
     ctx.middleware(async (session, next) => {
-      const elements = session.elements
+      const { elements, quote } = session
       if (!elements?.length) return next()
-      const offset = elements[0].type === 'quote' ? 1 : 0
-      const firstEl = elements[offset]
-      if (firstEl?.type !== 'text') return next()
-      let text = firstEl.attrs.content.trim()
+      const kIndex = elements.findIndex(el => el.type === 'text' && el.attrs.content.trim())
+      if (kIndex === -1) return next()
+      let text = elements[kIndex].attrs.content.trim()
       if (config.triggerMode === 'prefix') {
-        const prefix = prefixes.find(p => text.startsWith(p))
-        if (!prefix) return next()
-        text = text.slice(prefix.length).trim()
+        const p = prefixes.find(p => text.startsWith(p))
+        if (!p) return next()
+        text = text.slice(p.length).trim()
       }
-      const [word, ...restStrings] = text.split(/\s+/)
+      const [word, ...rest] = text.split(/\s+/)
       const item = await provider.getInfo(word, session)
       const shortcut = provider.findShortcut(word, session)
       if (!item && !shortcut) return next()
-      const input: h[] = [
-        ...(session.quote?.content ? h.parse(session.quote.content) : []),
-        h.text(restStrings.join(' ')),
-        ...elements.slice(offset + 1)
+      const before = elements.slice(0, kIndex).filter(el => el.type !== 'quote')
+      const ats = before.filter(el => el.type === 'at')
+      const others = before.filter(el => el.type !== 'at')
+      const input = [
+        ...(quote?.content ? h.parse(quote.content) : []), ...others,
+        h.text(rest.join(' ')), ...elements.slice(kIndex + 1), ...ats
       ].filter(el => el.type !== 'text' || el.attrs.content.trim())
-      const targetKey = shortcut ? shortcut.meme.key : item!.key
-      const finalInput = shortcut ? [...h.parse(shortcut.shortcutArgs.join(' ')), ...input] : input
-      return session.execute({ name: 'memes.make', args: [targetKey, finalInput] })
+      const key = shortcut ? shortcut.meme.key : item!.key
+      const args = shortcut ? [...h.parse(shortcut.shortcutArgs.join(' ')), ...input] : input
+      return session.execute({ name: 'memes.make', args: [key, args] })
     }, true)
   }
 }
